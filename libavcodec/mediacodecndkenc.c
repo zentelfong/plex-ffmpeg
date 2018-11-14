@@ -20,7 +20,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <media/NdkMediaCodec.h>
+#include "mediacodec/MediaCodec.h"
 
 #include "libavutil/internal.h"
 #include "libavutil/imgutils.h"
@@ -71,10 +71,12 @@ static av_cold int mediacodecndk_encode_init(AVCodecContext *avctx)
     AMediaFormat* format = NULL;
     int pixelFormat;
     const char* mime = "video/avc";
+	
+/*	
     int ret = ff_mediacodecndk_init_binder();
-
     if (ret < 0)
         return ret;
+*/
 
     pixelFormat = ff_mediacodecndk_get_color_format(avctx->pix_fmt);
 
@@ -93,7 +95,8 @@ static av_cold int mediacodecndk_encode_init(AVCodecContext *avctx)
         AMediaFormat_setInt32(format, "virtualbuffersize", avctx->rc_buffer_size);
     }
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, avctx->bit_rate);
-
+	
+	//注意编码器初始化时需要指定framerate
     AMediaFormat_setFloat(format, AMEDIAFORMAT_KEY_FRAME_RATE, av_q2d(avctx->framerate));
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, 1);//FIXME
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_STRIDE, avctx->width);
@@ -120,6 +123,7 @@ static av_cold int mediacodecndk_encode_init(AVCodecContext *avctx)
     return 0;
 }
 
+//frame的宽度高度及像素格式需要设置好，不然编码的视频是绿色纯色
 static int mediacodecndk_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                                       const AVFrame *frame, int *got_packet)
 {

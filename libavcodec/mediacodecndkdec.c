@@ -24,7 +24,7 @@
 #include "libavutil/buffer_internal.h"
 #include "libavutil/avassert.h"
 
-#include <media/NdkMediaCodec.h>
+#include "mediacodec/MediaCodec.h"
 #include "avcodec.h"
 #include "internal.h"
 #include "h264.h"
@@ -62,10 +62,14 @@ static av_cold int mediacodecndk_decode_init(AVCodecContext *avctx)
     AMediaFormat* format;
     const char* mime;
     const char *bsf_name = NULL;
+	
+/*
     int ret = ff_mediacodecndk_init_binder();
 
     if (ret < 0)
         return ret;
+*/
+
 
     switch (avctx->codec_id) {
     case AV_CODEC_ID_H264:

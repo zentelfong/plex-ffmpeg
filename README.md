@@ -1,48 +1,34 @@
 FFmpeg README
 =============
 
-FFmpeg is a collection of libraries and tools to process multimedia content
-such as audio, video, subtitles and related metadata.
+该版本的FFmpeg支持安卓下使用mediacodec硬件编码h264视频。 
 
-## Libraries
+### 支持mediacodec编译
 
-* `libavcodec` provides implementation of a wider range of codecs.
-* `libavformat` implements streaming protocols, container formats and basic I/O access.
-* `libavutil` includes hashers, decompressors and miscellaneous utility functions.
-* `libavfilter` provides a mean to alter decoded Audio and Video through chain of filters.
-* `libavdevice` provides an abstraction to access capture and playback devices.
-* `libswresample` implements audio mixing and resampling routines.
-* `libswscale` implements color conversion and scaling routines.
+1. 先编译mediacodec，该库允许在Android 4.x版本下使用mediacodec ndk接口。进入mediacodec目录下，运行ndk-build即可编译为libmediacodec.a。
 
-## Tools
+2. ffmpeg configure添加编译选项如下：
 
-* [ffmpeg](https://ffmpeg.org/ffmpeg.html) is a command line toolbox to
-  manipulate, convert and stream multimedia content.
-* [ffplay](https://ffmpeg.org/ffplay.html) is a minimalistic multimedia player.
-* [ffprobe](https://ffmpeg.org/ffprobe.html) is a simple analysis tool to inspect
-  multimedia content.
-* [ffserver](https://ffmpeg.org/ffserver.html) is a multimedia streaming server
-  for live broadcasts.
-* Additional small tools such as `aviocat`, `ismindex` and `qt-faststart`.
+```
+ --enable-jni
+ --enable-mediacodec
+ --enable-mediacodecndk
+ --enable-encoder=h264_mediacodecndk
+ --enable-decoder=h264_mediacodecndk
+```
 
-## Documentation
+建议编译为静态库，编译完成后再合成为一个动态库。
 
-The offline documentation is available in the **doc/** directory.
+3. 将ffmpeg编译出的静态库以及libmediacodec.a文件一起编译为ffmpeg.so即可。
 
-The online documentation is available in the main [website](https://ffmpeg.org)
-and in the [wiki](https://trac.ffmpeg.org).
+### 使用mediacodec进行编解码
 
-### Examples
+编码时使用 avcodec_find_encoder_by_name("h264_mediacodecndk");替换h264编码器即可。
 
-Coding examples are available in the **doc/examples** directory.
+解码时使用avcodec_find_decoder_by_name("h264_mediacodecndk");替换h264解码器即可。
 
-## License
 
-FFmpeg codebase is mainly LGPL-licensed with optional components licensed under
-GPL. Please refer to the LICENSE file for detailed information.
 
-## Contributing
+注意：
 
-Patches should be submitted to the ffmpeg-devel mailing list using
-`git format-patch` or `git send-email`. Github pull requests should be
-avoided because they are not part of our review process and will be ignored.
+安卓4.x下运行需要将mediacodec/libs下的.so文件拷贝到项目工程下。
