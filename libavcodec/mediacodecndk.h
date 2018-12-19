@@ -48,6 +48,13 @@ enum FFMediaCodecNDKColorFormat {
     COLOR_FormatRGBAFlexible = 0x7f36a888,
     COLOR_Format16bitRGB565 = 0x00000006,
     COLOR_FormatSurface = 0x7f000789,
+
+    COLOR_QCOM_FormatYUV420SemiPlanar                     = 0x7fa30c00,
+    COLOR_QCOM_FormatYUV420SemiPlanar32m                  = 0x7fa30c04,
+    COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka = 0x7fa30c03,
+    COLOR_TI_FormatYUV420PackedSemiPlanar                 = 0x7f000100,
+    COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced       = 0x7f000001,    
 };
+
 
 #endif

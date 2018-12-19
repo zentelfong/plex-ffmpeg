@@ -30,6 +30,23 @@
 #include "h264.h"
 #include "mediacodecndk.h"
 
+
+static const struct {
+    int color_format;
+    enum AVPixelFormat pix_fmt;
+
+} color_formats[] = {
+    { COLOR_FormatYUV420Planar,                              AV_PIX_FMT_YUV420P },
+    { COLOR_FormatYUV420SemiPlanar,                          AV_PIX_FMT_NV12    },
+    { COLOR_QCOM_FormatYUV420SemiPlanar,                     AV_PIX_FMT_NV12    },
+    { COLOR_QCOM_FormatYUV420SemiPlanar32m,                  AV_PIX_FMT_NV12    },
+    { COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka, AV_PIX_FMT_NV12    },
+    { COLOR_TI_FormatYUV420PackedSemiPlanar,                 AV_PIX_FMT_NV12    },
+    { COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced,       AV_PIX_FMT_NV12    },
+    { 0 }
+};
+
+
 typedef struct
 {
     AVClass *avclass;
@@ -38,8 +55,16 @@ typedef struct
     AVBSFContext *bsfc;
 
     uint32_t stride, plane_height;
+    enum AVPixelFormat pix_fmt;
+    int crop_top;
+    int crop_bottom;
+    int crop_left;
+    int crop_right;
+    int slice_height;
+
     int deint_mode;
     int eos_reached;
+    int color_format;
 } MediaCodecNDKDecoderContext;
 
 #define TIMEOUT 10000
@@ -49,6 +74,54 @@ static const AVOption options[] = {
     { "hwdeint_mode", "Used for setting deinterlace mode in MediaCodecNDKDecoder", OFFSET(deint_mode), AV_OPT_TYPE_INT,{ .i64 = 1 } , 0, 2, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM },
     { NULL },
 };
+
+
+//像素转换函数
+void mediacodecndk_sw_buffer_copy_yuv420_planar(AVCodecContext *avctx,
+                                                MediaCodecNDKDecoderContext *s,
+                                                uint8_t *data,
+                                                size_t size,
+                                                AMediaCodecBufferInfo *info,
+                                                AVFrame *frame);
+
+ void mediacodecndk_sw_buffer_copy_yuv420_semi_planar(AVCodecContext *avctx,
+                                                     MediaCodecNDKDecoderContext *s,
+                                                     uint8_t *data,
+                                                     size_t size,
+                                                     AMediaCodecBufferInfo *info,
+                                                     AVFrame *frame);
+
+ void mediacodecndk_sw_buffer_copy_yuv420_packed_semi_planar(AVCodecContext *avctx,
+                                                            MediaCodecNDKDecoderContext *s,
+                                                            uint8_t *data,
+                                                            size_t size,
+                                                            AMediaCodecBufferInfo *info,
+                                                            AVFrame *frame);
+
+  void mediacodecndk_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(AVCodecContext *avctx,
+                                                                           MediaCodecNDKDecoderContext *s,
+                                                                           uint8_t *data,
+                                                                           size_t size,
+                                                                           AMediaCodecBufferInfo *info,
+                                                                           AVFrame *frame);                                                          
+
+
+static enum AVPixelFormat mediacodecndk_map_color_format(int color_format)
+{
+    int i;
+    enum AVPixelFormat ret = AV_PIX_FMT_NONE;
+
+    for (i = 0; i < FF_ARRAY_ELEMS(color_formats); i++) {
+        if (color_formats[i].color_format == color_format) {
+            return color_formats[i].pix_fmt;
+        }
+    }
+
+    av_log(NULL, AV_LOG_ERROR, "Output color format 0x%x (value=%d) is not supported\n",
+        color_format, color_format);
+    return ret;
+}
+
 
 static void mediacodecndk_delete_decoder(void *opaque, uint8_t *data)
 {
@@ -110,8 +183,9 @@ static av_cold int mediacodecndk_decode_init(AVCodecContext *avctx)
     if (!format)
         return AVERROR(ENOMEM);
 
+    ctx->color_format = COLOR_FormatYUV420SemiPlanar;
     AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime);
-    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, COLOR_FormatYUV420SemiPlanar);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, ctx->color_format);
     // Set these fields to output dimension when HW scaler in decoder is ready
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, avctx->width);
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, avctx->height);
@@ -221,30 +295,39 @@ static int mediacodecndk_dequeue_output_buffer(AVCodecContext *avctx, AVFrame* f
         } else if (out_index == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
             av_log(avctx, AV_LOG_DEBUG, "Mediacodec info output buffers changed\n");
         } else if (out_index == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
-            int32_t width, height, plane_height, stride;
+            int32_t width, height, plane_height, stride,slice_height;
             AMediaFormat *format = NULL;
             int color_format = 0;
-            enum AVPixelFormat pix_fmt;
             format = AMediaCodec_getOutputFormat(ctx->decoder);
 
-            AMediaFormat_getInt32(format, "crop-width", &width);
-            AMediaFormat_getInt32(format, "crop-height", &height);
+            AMediaFormat_getInt32(format, "width", &width);
+            AMediaFormat_getInt32(format, "height", &height);
             AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_HEIGHT, &plane_height);
             AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_STRIDE, &stride);
             AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, &color_format);
+
+            AMediaFormat_getInt32(format, "crop-top", &ctx->crop_top);
+            AMediaFormat_getInt32(format, "crop-bottom", &ctx->crop_bottom);
+            AMediaFormat_getInt32(format, "crop-left", &ctx->crop_left);
+            AMediaFormat_getInt32(format, "crop-right", &ctx->crop_right);
+   
+            AMediaFormat_getInt32(format, "slice-height", &slice_height);
+            ctx->slice_height = slice_height > 0 ? slice_height : height;
+
             AMediaFormat_delete(format);
-            pix_fmt = ff_mediacodecndk_get_pix_fmt(color_format);
-            if (pix_fmt == AV_PIX_FMT_NONE) {
-                av_log(avctx, AV_LOG_ERROR, "Unsupported color format: %i\n", color_format);
-                return AVERROR_EXTERNAL;
-            }
-            avctx->pix_fmt = pix_fmt;
+
+            ctx->pix_fmt = avctx->pix_fmt = mediacodecndk_map_color_format(color_format);
+            ctx->color_format = color_format;
+
             if (stride)
                 ctx->stride = stride;
+
             if (plane_height)
                 ctx->plane_height = plane_height;
+
             if (width && height)
                 ff_set_dimensions(avctx, width, height);
+
             av_assert0(ctx->plane_height >= avctx->height &&
                        ctx->stride >= avctx->width);
         } else if (out_index == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
@@ -262,32 +345,50 @@ static int mediacodecndk_dequeue_output_buffer(AVCodecContext *avctx, AVFrame* f
 
     frame->width = avctx->width;
     frame->height = avctx->height;
+    frame->format = avctx->pix_fmt;
 
     if (!(ref = av_buffer_ref(ctx->decoder_ref))) {
         ret = AVERROR(ENOMEM);
         goto fail;
     }
 
-    frame->buf[0] = av_buffer_create((void*)(uint64_t)out_index, out_size, mediacodecndk_free_buffer,
-                                     ref, BUFFER_FLAG_READONLY);
-    if (!frame->buf[0]) {
-        av_buffer_unref(&ref);
-        ret = AVERROR(ENOMEM);
-        goto fail;
+    /* MediaCodec buffers needs to be copied to our own refcounted buffers
+     * because the flush command invalidates all input and output buffers.
+     */
+    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0) {
+        av_log(avctx, AV_LOG_ERROR, "Could not allocate buffer\n");
+        goto done;
     }
-    frame->data[0] = out_buffer;
-    frame->linesize[0] = ctx->stride;
-    frame->data[1] = out_buffer + ctx->stride * ctx->plane_height;
-    if (avctx->pix_fmt == AV_PIX_FMT_NV12) {
-        frame->linesize[1] = ctx->stride;
-    } else {
-        // FIXME: assuming chroma plane's stride is 1/2 of luma plane's for YV12
-        frame->linesize[1] = frame->linesize[2] = ctx->stride / 2;
-        frame->data[2] = frame->data[1] + ctx->stride * ctx->plane_height / 4;
-    }
+
     frame->pts = frame->pkt_pts = bufferInfo.presentationTimeUs;
     frame->pkt_dts = AV_NOPTS_VALUE;
-    return 1;
+
+    //转换像素格式
+    switch (ctx->color_format) 
+    {
+    case COLOR_FormatYUV420Planar:
+        mediacodecndk_sw_buffer_copy_yuv420_planar(avctx, ctx, out_buffer, size, &bufferInfo, frame);
+        break;
+    case COLOR_FormatYUV420SemiPlanar:
+    case COLOR_QCOM_FormatYUV420SemiPlanar:
+    case COLOR_QCOM_FormatYUV420SemiPlanar32m:
+        mediacodecndk_sw_buffer_copy_yuv420_semi_planar(avctx, ctx, out_buffer, size, &bufferInfo, frame);
+        break;
+    case COLOR_TI_FormatYUV420PackedSemiPlanar:
+    case COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced:
+        mediacodecndk_sw_buffer_copy_yuv420_packed_semi_planar(avctx, ctx, out_buffer, size, &bufferInfo, frame);
+        break;
+    case COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka:
+        mediacodecndk_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(avctx, ctx, out_buffer, size, &bufferInfo, frame);
+        break;
+    default:
+        av_log(avctx, AV_LOG_ERROR, "Unsupported color format 0x%x (value=%d)\n",
+            ctx->color_format, ctx->color_format);
+        ret = AVERROR(EINVAL);
+        goto fail;
+    }
+    //return 1;
+    ret = 1;
 fail:
     AMediaCodec_releaseOutputBuffer(ctx->decoder, out_index, false);
     return ret;
@@ -354,3 +455,7 @@ static av_cold void mediacodecndk_decode_flush(AVCodecContext *avctx)
 FFMC_DEC(h264, AV_CODEC_ID_H264)
 FFMC_DEC(hevc, AV_CODEC_ID_HEVC)
 FFMC_DEC(mpeg2, AV_CODEC_ID_MPEG2VIDEO)
+
+
+
+#include "mediacodecndk_convert.c"
