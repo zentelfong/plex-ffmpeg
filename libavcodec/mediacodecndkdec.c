@@ -24,7 +24,7 @@
 #include "libavutil/buffer_internal.h"
 #include "libavutil/avassert.h"
 
-#include "mediacodec/MediaCodec.h"
+#include "mediacodecndk_codec.h"
 #include "avcodec.h"
 #include "internal.h"
 #include "h264.h"
