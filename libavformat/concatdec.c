@@ -91,10 +91,10 @@ static int safe_filename(const char *f)
         /* A-Za-z0-9_- */
         if (!((unsigned)((*f | 32) - 'a') < 26 ||
               (unsigned)(*f - '0') < 10 || *f == '_' || *f == '-')) {
-            if (f == start)
-                return 0;
-            else if (*f == '/')
+            if (*f == '/')
                 start = f + 1;
+			else if (f == start)
+                return 0;
             else if (*f != '.')
                 return 0;
         }
